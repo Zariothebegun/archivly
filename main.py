@@ -39,6 +39,7 @@ from storage import (
     enviar_ficheiro,
     modo_armazenamento,
 )
+from r2_recovery import listar_objetos_usuario_r2
 
 app = FastAPI(title="Archivly API", version="1.0.0")
 
@@ -246,14 +247,56 @@ async def upload_ficheiros(
 
 @app.get("/api/ficheiros")
 def listar_ficheiros(utilizador: dict = Depends(obter_utilizador_atual)):
-    """Lista todos os ficheiros do utilizador autenticado."""
+    """Lista os ficheiros e recupera metadados perdidos a partir do R2, se necessário."""
     conn = get_db()
-    ficheiros = conn.execute(
-        "SELECT * FROM files WHERE user_id = ? ORDER BY uploaded_at DESC",
-        (utilizador["user_id"],),
-    ).fetchall()
-    conn.close()
-    return {"ficheiros": [dict(f) for f in ficheiros]}
+    try:
+        ficheiros = conn.execute(
+            "SELECT * FROM files WHERE user_id = ? ORDER BY uploaded_at DESC",
+            (utilizador["user_id"],),
+        ).fetchall()
+
+        # O disco SQLite gratuito do Render pode ser recriado. Os originais em
+        # R2 continuam intactos; quando a lista está vazia, reconstituímos os
+        # registos a partir das chaves persistidas no bucket.
+        if not ficheiros:
+            try:
+                objetos = listar_objetos_usuario_r2(utilizador["user_id"])
+            except Exception as erro:
+                print(f"[r2-recovery] Falha na leitura do bucket: {type(erro).__name__}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Não foi possível recuperar os ficheiros do armazenamento. Verifica a ligação ao Cloudflare.",
+                )
+
+            if objetos and not os.getenv("R2_PUBLIC_URL"):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Os ficheiros existem, mas falta configurar o endereço público do armazenamento.",
+                )
+
+            for objeto in objetos:
+                conn.execute(
+                    """INSERT INTO files
+                       (user_id, original_name, file_type, mime_type, size_bytes,
+                        r2_key, r2_url, thumbnail_r2_key, thumbnail_url, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))""",
+                    (
+                        utilizador["user_id"], objeto["original_name"], objeto["file_type"],
+                        objeto["mime_type"], objeto["size_bytes"], objeto["r2_key"],
+                        objeto["r2_url"], objeto["thumbnail_r2_key"], objeto["thumbnail_url"],
+                        objeto["uploaded_at"],
+                    ),
+                )
+            if objetos:
+                conn.commit()
+                ficheiros = conn.execute(
+                    "SELECT * FROM files WHERE user_id = ? ORDER BY uploaded_at DESC",
+                    (utilizador["user_id"],),
+                ).fetchall()
+
+        return {"ficheiros": [dict(f) for f in ficheiros]}
+    finally:
+        conn.close()
 
 
 @app.delete("/api/ficheiros/{ficheiro_id}")
