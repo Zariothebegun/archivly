@@ -1,105 +1,138 @@
 # Archivly
 
-Envia ficheiros. Recebe um site pesquisável, publicado automaticamente no GitHub Pages, em menos de 60 segundos.
+Envia ficheiros. Recebe um site pesquisável, publicado automaticamente, em menos de 60 segundos.
 
-> **Importante:** esta aplicação precisa de um servidor ligado (não corre "dentro" do telemóvel).
-> As instruções abaixo usam apenas serviços **gratuitos** e são feitas 100% pelo browser do telemóvel — não precisas de PC nem de instalar nada localmente.
+O utilizador cria conta, envia fotos/vídeos/áudio/documentos, dá um nome ao site e carrega em
+**Publicar**. O Archivly gera um site estático (grid de miniaturas + pesquisa + filtro por tipo)
+e publica-o — no **GitHub Pages** se houver token, ou **no próprio servidor** (`/sites/<nome>/`)
+se não houver. Funciona logo, sem configuração.
 
 ---
 
-## Passo 1 — Colocar o código no GitHub
+## Publicar agora (o caminho mais rápido)
 
-1. Cria conta em [github.com](https://github.com) (se ainda não tiveres).
-2. Cria um repositório novo (botão **New**), ex: `archivly-app`. Pode ser público.
-3. No teu telemóvel, abre o repositório → **Add file → Upload files** → seleciona todos os ficheiros e pastas desta entrega (`backend/` completo) → **Commit changes**.
+👉 **[Guia completo de deploy em DEPLOY.md](DEPLOY.md)**
 
-## Passo 2 — Gerar o token do GitHub (para publicar os sites dos clientes)
+Resumo, se quiseres só pôr no ar já (Render, grátis, ~10 min):
 
-Este token é diferente da tua conta — é o que a aplicação usa para criar repositórios automaticamente.
+1. Abre **[render.com/deploy?repo=https://github.com/Zariothebegun/archivly](https://render.com/deploy?repo=https://github.com/Zariothebegun/archivly)**
+2. Entra com o GitHub e carrega em **Apply**.
+3. O Render lê o `render.yaml` (Docker + health check + `SECRET_KEY` automática) e faz o build.
+4. Ficas com um URL tipo `https://archivly.onrender.com`.
 
-1. Vai a **github.com/settings/tokens?type=beta**
-2. **Generate new token**
-3. Em "Repository access" escolhe **All repositories** (para poder criar novos repos)
-4. Em "Permissions" ativa:
-   - **Administration**: Read and write
-   - **Contents**: Read and write
-   - **Pages**: Read and write
-5. Gera o token e **copia-o já** (só aparece uma vez).
+Verifica com:
 
-## Passo 3 — Criar a conta gratuita na Cloudflare R2 (armazenamento dos ficheiros)
+```bash
+python smoke_test.py https://archivly.onrender.com
+# Resultado: TUDO OK - a aplicação está funcional.
+```
 
-1. Cria conta grátis em [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up)
-2. No menu lateral: **R2 Object Storage → Create bucket**. Nome: `archivly-files`.
-3. Dentro do bucket: **Settings → Public Access → Allow Access** (para os ficheiros terem um URL público). Copia o URL público que aparece (algo como `https://pub-xxxx.r2.dev`).
-4. Volta a **R2 → Manage API Tokens → Create API Token**. Permissões: **Object Read & Write**. Copia o **Access Key ID** e a **Secret Access Key**.
-5. O "Account ID" aparece no canto direito da página principal da Cloudflare.
+> Alternativas (Koyeb, Hugging Face Spaces, Fly.io) e as limitações do plano grátis
+> estão comparadas em [DEPLOY.md](DEPLOY.md).
 
-Isto é gratuito até 10 GB de armazenamento e cobre confortavelmente um MVP.
+---
 
-## Passo 4 — Publicar a aplicação num serviço gratuito (Render.com)
+## Correr localmente
 
-1. Cria conta grátis em [render.com](https://render.com) (podes entrar com o GitHub).
-2. **New → Web Service**.
-3. Escolhe o repositório `archivly-app` que criaste no Passo 1.
-4. Render vai detetar o `Dockerfile` automaticamente — deixa como está.
-5. Em **Environment Variables**, adiciona todas as variáveis do ficheiro `.env.example`:
-   - `SECRET_KEY` → qualquer texto aleatório longo
-   - `GITHUB_TOKEN` → o token do Passo 2
-   - `GITHUB_USERNAME` → o teu username do GitHub
-   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` → do Passo 3
-6. Escolhe o plano **Free** e clica **Create Web Service**.
-7. Espera o build terminar (uns minutos) — no final tens um URL tipo `https://archivly-app.onrender.com`. É esse o link da tua aplicação.
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
-> Nota sobre o plano Free do Render: o serviço "adormece" após 15 min sem uso e demora ~30s a acordar no pedido seguinte. Para um MVP é normal e não custa nada.
+Abre `http://127.0.0.1:8000`. **Não precisas de `.env`** — sem variáveis definidas a app
+usa o modo local (ficheiros em `data/media`, sites em `data/sites`, base de dados em `data/archivly.db`).
 
-## Passo 5 — Usar
+Teste rápido de ponta a ponta (cria conta, envia ficheiro, publica site, confirma o link):
 
-1. Abre o URL da tua aplicação no telemóvel.
-2. Cria conta (email + password).
-3. Envia os ficheiros (arrastar ou escolher).
-4. Dá um nome ao site e carrega em **Publicar site**.
-5. Em menos de um minuto tens o link `https://<o-teu-username>.github.io/archivly-nome-do-site/` a funcionar.
+```bash
+.venv/bin/python smoke_test.py
+```
+
+Opcional, para teres miniaturas de vídeo e build via Hugo:
+
+```bash
+cp .env.example .env    # preenche só o que quiseres
+bash setup.sh           # instala Hugo, ffmpeg e as dependências Python
+```
+
+---
+
+## Modos de funcionamento
+
+A aplicação adapta-se ao que está configurado — não há modo "incompleto":
+
+| O que está configurado | Armazenamento | Publicação dos sites |
+|---|---|---|
+| Nada | Disco local (`data/media`) | Local, em `/sites/<nome>/` |
+| Só `GITHUB_TOKEN` + `GITHUB_USERNAME` | Disco local | GitHub Pages ⚠️ (ver nota) |
+| Só `R2_*` | Cloudflare R2 (CDN) | Local, em `/sites/<nome>/` |
+| `R2_*` + `GITHUB_TOKEN` | Cloudflare R2 | GitHub Pages ✅ (modo completo) |
+
+⚠️ **Nota:** os sites no GitHub Pages são um domínio diferente, por isso os links para
+`/media/...` do teu servidor não funcionam lá. Para publicar no GitHub Pages, configura
+também o R2 (grátis até 10 GB) — instruções em [DEPLOY.md](DEPLOY.md#opção-c--ligar-o-github-pages-e-o-cloudflare-r2-quando-quiseres).
+
+O mesmo para o gerador de sites: usa **Hugo** quando o binário existe (o `Dockerfile` instala-o)
+e, caso contrário, um **gerador em Python** que produz exatamente o mesmo HTML/CSS/JS.
+Podes ver o que está ativo no topo do dashboard ou em `GET /api/estado`.
 
 ---
 
 ## Estrutura do projeto
 
 ```
-backend/
-├── main.py              # App FastAPI - liga tudo
-├── database.py          # SQLite (users, files, sites)
-├── auth.py               # Registo/login/tokens de sessão
-├── storage.py            # Upload para Cloudflare R2
+archivly/
+├── main.py               # App FastAPI: API + serve o frontend + /media e /sites
+├── database.py           # SQLite (users, files, sites) em data/archivly.db
+├── auth.py               # Registo/login, password PBKDF2 + salt, sessão JWT
+├── storage.py            # Cloudflare R2 ou disco local (automático)
 ├── processing.py         # Deteção de tipo + miniaturas (Pillow/ffmpeg)
-├── hugo_generator.py      # Gera o site estático com Hugo
-├── github_publisher.py    # Cria repo, faz push, ativa GitHub Pages
-├── models.py              # Modelos Pydantic
+├── hugo_generator.py     # Gera o site estático (Hugo ou gerador Python)
+├── github_publisher.py   # Cria repo, faz push, ativa o GitHub Pages
+├── local_publisher.py    # Publica o site no próprio servidor (sem GitHub)
+├── models.py             # Modelos Pydantic
 ├── frontend/
-│   ├── index.html         # Login / registo
-│   ├── dashboard.html      # Upload + lista + publicar
+│   ├── index.html          # Login / registo
+│   ├── dashboard.html      # Upload + lista + publicar + sites
 │   └── static/
-│       ├── style.css       # Tema verde/preto
-│       ├── app.js          # Funções partilhadas (token, API)
-│       └── logo.png        # O teu logo (a imagem que enviaste)
-├── Dockerfile
-├── setup.sh               # Instalação manual (se preferires correr num PC/VPS)
+│       ├── style.css       # Tema verde/preto, mobile-first
+│       ├── app.js          # Sessão, chamadas à API, avisos
+│       └── logo.svg        # Logótipo
+├── smoke_test.py         # Teste de ponta a ponta (local ou contra o deploy)
+├── Dockerfile            # Imagem com Python + git + ffmpeg + Hugo
+├── render.yaml           # Blueprint do Render (deploy em 1 clique)
+├── setup.sh              # Instalação manual (PC/VPS)
 ├── requirements.txt
-└── .env.example
+├── .env.example          # Todas as variáveis (nenhuma é obrigatória)
+└── DEPLOY.md             # Guia de publicação detalhado
 ```
 
-## Correr num PC/VPS em vez de usar o Render (opcional)
+## API
 
-```bash
-cp .env.example .env      # depois edita o .env com os teus valores
-bash setup.sh             # instala hugo, ffmpeg e as dependências Python
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/healthz` | Health check (usado pelo Render) |
+| GET | `/api/estado` | O que está configurado (armazenamento, GitHub, Hugo) |
+| POST | `/api/registo` | Criar conta (`email`, `password`) |
+| POST | `/api/login` | Entrar e receber token |
+| POST | `/api/upload` | Enviar ficheiros (`multipart`, campo `ficheiros`) |
+| GET | `/api/ficheiros` | Listar ficheiros do utilizador |
+| DELETE | `/api/ficheiros/{id}` | Apagar ficheiro |
+| POST | `/api/publicar` | Gerar e publicar o site (`site_name`) |
+| GET | `/api/sites` | Listar sites publicados |
+| DELETE | `/api/sites/{id}` | Apagar registo de um site |
+
+Documentação interativa automática em `/docs` (Swagger).
 
 ## Erros comuns
 
 | Erro | Causa provável |
 |---|---|
-| "Token do GitHub inválido" | O `GITHUB_TOKEN` no `.env`/Render está errado ou expirou |
-| "Limite de pedidos à API do GitHub atingido" | Muitas publicações seguidas — espera alguns minutos |
-| Miniaturas de vídeo não aparecem | O `ffmpeg` não está instalado (usa o Dockerfile fornecido, já o inclui) |
-| Upload falha silenciosamente | Verifica as chaves do R2 e se o bucket tem "Public Access" ativado |
+| "Token do GitHub inválido" | `GITHUB_TOKEN` errado ou expirado |
+| "O token não tem a permissão 'Administration'" | O token precisa de Administration/Contents/Pages em Read and write |
+| "Limite de pedidos à API do GitHub atingido" | Muitas publicações seguidas — espera uns minutos |
+| Miniaturas de vídeo não aparecem | `ffmpeg` não está instalado (usa o `Dockerfile`, já o inclui) |
+| Upload falha | Verifica as chaves do R2 e se o bucket tem "Public Access" ativado |
+| Dados desapareceram após um deploy | Plano grátis do Render tem disco efémero — vê "Limitações" em [DEPLOY.md](DEPLOY.md) |
+| Primeira visita demora ~40 s | O serviço grátis estava adormecido; acorda sozinho |

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivly — Envia ficheiros, recebe um site</title>
+  <meta name="description" content="Envia os teus ficheiros e recebe um site pesquisável publicado automaticamente.">
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="ecra-login">
+    <div class="cartao-login">
+      <div class="marca">
+        <img src="/static/logo.svg" alt="Logótipo do Archivly">
+        <h1>Archivly</h1>
+      </div>
+      <p class="slogan">Envia ficheiros. Recebe um site pesquisável,<br>publicado automaticamente.</p>
+
+      <div class="abas">
+        <button type="button" id="aba-login" class="ativa">Entrar</button>
+        <button type="button" id="aba-registo">Criar conta</button>
+      </div>
+
+      <form id="formulario" autocomplete="on">
+        <div class="campo">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="o-teu@email.com" required autocomplete="email">
+        </div>
+
+        <div class="campo">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="••••••••" required
+                 autocomplete="current-password" minlength="6">
+        </div>
+
+        <button type="submit" class="btn" id="botao-submeter">Entrar</button>
+        <p class="erro-msg" id="mensagem-erro" style="display:none;"></p>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    // Já tem sessão? Vai direto para o dashboard.
+    if (obterToken()) window.location.replace("/dashboard");
+
+    let modo = "login"; // 'login' ou 'registo'
+
+    const abaLogin = document.getElementById("aba-login");
+    const abaRegisto = document.getElementById("aba-registo");
+    const formulario = document.getElementById("formulario");
+    const botao = document.getElementById("botao-submeter");
+    const campoPassword = document.getElementById("password");
+    const mensagemErro = document.getElementById("mensagem-erro");
+
+    function definirModo(novoModo) {
+      modo = novoModo;
+      const aEntrar = modo === "login";
+      abaLogin.className = aEntrar ? "ativa" : "";
+      abaRegisto.className = aEntrar ? "" : "ativa";
+      botao.textContent = aEntrar ? "Entrar" : "Criar conta e entrar";
+      campoPassword.setAttribute("autocomplete", aEntrar ? "current-password" : "new-password");
+      mensagemErro.style.display = "none";
+    }
+
+    abaLogin.addEventListener("click", () => definirModo("login"));
+    abaRegisto.addEventListener("click", () => definirModo("registo"));
+
+    formulario.addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      mensagemErro.style.display = "none";
+
+      const email = document.getElementById("email").value.trim();
+      const password = campoPassword.value;
+      if (!email || !password) return;
+
+      botao.disabled = true;
+      botao.textContent = "Aguarde...";
+
+      try {
+        const destino = modo === "login" ? "/api/login" : "/api/registo";
+        const dados = await api(destino, { method: "POST", body: JSON.stringify({ email, password }) });
+        guardarSessao(dados.token, dados.email);
+        window.location.replace("/dashboard");
+      } catch (erro) {
+        mensagemErro.textContent = erro.message;
+        mensagemErro.style.display = "block";
+        botao.disabled = false;
+        botao.textContent = modo === "login" ? "Entrar" : "Criar conta e entrar";
+      }
+    });
+  </script>
+</body>
+</html>

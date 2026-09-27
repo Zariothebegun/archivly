@@ -1,0 +1,23 @@
+# Segredos e configuração local - nunca para o Git
+.env
+.env.*
+!.env.example
+
+# Dados criados em runtime (base de dados, uploads, sites publicados)
+data/
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

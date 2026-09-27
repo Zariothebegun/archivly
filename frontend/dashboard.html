@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivly — Dashboard</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topo-app">
+    <div class="marca">
+      <img src="/static/logo.svg" alt="Logótipo do Archivly">
+      <h1>Archivly</h1>
+    </div>
+    <div class="utilizador">
+      <span class="email-utilizador" id="email-utilizador"></span>
+      <button class="sair" id="botao-sair" type="button">Sair</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="avisos" id="avisos"></div>
+
+    <!-- 1. Enviar ficheiros -->
+    <section class="seccao">
+      <h2>1. Enviar ficheiros</h2>
+      <p class="descricao">Fotos, vídeos, áudio ou documentos. Podes enviar vários de uma vez.</p>
+
+      <div class="zona-upload" id="zona-upload">
+        <span class="icone">&#128228;</span>
+        <p class="primario">Toca para escolher ficheiros</p>
+        <p>ou arrasta-os para aqui</p>
+      </div>
+      <input type="file" id="entrada-ficheiros" multiple hidden>
+
+      <div class="barra-progresso" id="barra-progresso"><div></div></div>
+      <p class="erro-msg" id="erro-upload" style="display:none;"></p>
+    </section>
+
+    <!-- 2. Os teus ficheiros -->
+    <section class="seccao">
+      <h2>2. Os teus ficheiros <span class="etiqueta" id="contador-ficheiros">0</span></h2>
+      <p class="descricao">Tudo o que já enviaste. É isto que entra no site publicado.</p>
+      <div class="lista" id="lista-ficheiros"></div>
+      <p class="vazio" id="ficheiros-vazio">Ainda não enviaste ficheiros.</p>
+    </section>
+
+    <!-- 3. Publicar -->
+    <section class="seccao">
+      <h2>3. Publicar o site</h2>
+      <p class="descricao">Dá um nome ao site e carrega em publicar. Demora menos de um minuto.</p>
+
+      <div class="linha-formulario">
+        <div class="campo">
+          <label for="nome-site">Nome do site</label>
+          <input type="text" id="nome-site" placeholder="Ex: Fotos de Família 2026">
+        </div>
+        <button class="btn" id="botao-publicar" type="button">Publicar site</button>
+      </div>
+      <p class="erro-msg" id="erro-publicacao" style="display:none;"></p>
+    </section>
+
+    <!-- 4. Sites publicados -->
+    <section class="seccao">
+      <h2>4. Os teus sites</h2>
+      <p class="descricao">Links dos sites que já publicaste.</p>
+      <div class="lista" id="lista-sites"></div>
+      <p class="vazio" id="sites-vazio">Ainda não publicaste nenhum site.</p>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    if (!exigirSessao()) { /* redireciona para o login */ }
+
+    const zonaUpload = document.getElementById("zona-upload");
+    const entradaFicheiros = document.getElementById("entrada-ficheiros");
+    const barraProgresso = document.getElementById("barra-progresso");
+    const erroUpload = document.getElementById("erro-upload");
+    const listaFicheiros = document.getElementById("lista-ficheiros");
+    const ficheirosVazio = document.getElementById("ficheiros-vazio");
+    const contadorFicheiros = document.getElementById("contador-ficheiros");
+    const listaSites = document.getElementById("lista-sites");
+    const sitesVazio = document.getElementById("sites-vazio");
+    const botaoPublicar = document.getElementById("botao-publicar");
+    const erroPublicacao = document.getElementById("erro-publicacao");
+    const caixaAvisos = document.getElementById("avisos");
+
+    document.getElementById("email-utilizador").textContent = localStorage.getItem("archivly_email") || "";
+    document.getElementById("botao-sair").addEventListener("click", terminarSessao);
+
+    let estado = { armazenamento: "local", github_pages: false };
+
+    /* ---------- Avisos de configuração ---------- */
+    async function carregarEstado() {
+      try {
+        estado = await api("/api/estado");
+        caixaAvisos.innerHTML = "";
+
+        if (!estado.github_pages) {
+          caixaAvisos.appendChild(aviso(
+            "informacao",
+            "Publicação local ativa",
+            "Os sites são publicados neste servidor em /sites/<nome>/ e o link aparece abaixo. " +
+            "Para publicar no GitHub Pages, define GITHUB_TOKEN e GITHUB_USERNAME nas variáveis de ambiente."
+          ));
+        } else {
+          caixaAvisos.appendChild(aviso(
+            "ok",
+            "GitHub Pages ligado",
+            "Os sites são publicados em " + estado.github_username + ".github.io."
+          ));
+        }
+
+        if (estado.armazenamento === "local") {
+          caixaAvisos.appendChild(aviso(
+            "informacao",
+            "Armazenamento local",
+            "Os ficheiros ficam guardados no servidor (pasta data/). Para produção com CDN, " +
+            "configura as variáveis R2_* (Cloudflare R2, grátis até 10 GB)."
+          ));
+        }
+      } catch (erro) {
+        console.error(erro);
+      }
+    }
+
+    function aviso(tipo, titulo, texto) {
+      const caixa = document.createElement("div");
+      caixa.className = "aviso" + (tipo === "informacao" ? " informacao" : "");
+      const forte = document.createElement("strong");
+      forte.textContent = titulo + ". ";
+      caixa.appendChild(forte);
+      caixa.appendChild(document.createTextNode(texto));
+      return caixa;
+    }
+
+    /* ---------- Upload ---------- */
+    zonaUpload.addEventListener("click", () => entradaFicheiros.click());
+    entradaFicheiros.addEventListener("change", () => enviarFicheiros(entradaFicheiros.files));
+
+    ["dragenter", "dragover"].forEach(ev =>
+      zonaUpload.addEventListener(ev, (e) => { e.preventDefault(); zonaUpload.classList.add("arrastar"); })
+    );
+    ["dragleave", "drop"].forEach(ev =>
+      zonaUpload.addEventListener(ev, (e) => { e.preventDefault(); zonaUpload.classList.remove("arrastar"); })
+    );
+    zonaUpload.addEventListener("drop", (e) => enviarFicheiros(e.dataTransfer.files));
+
+    async function enviarFicheiros(ficheiros) {
+      if (!ficheiros || ficheiros.length === 0) return;
+
+      const dados = new FormData();
+      Array.from(ficheiros).forEach(f => dados.append("ficheiros", f, f.name));
+
+      erroUpload.style.display = "none";
+      barraProgresso.classList.add("visivel");
+      zonaUpload.style.pointerEvents = "none";
+
+      try {
+        const resposta = await api("/api/upload", { method: "POST", body: dados });
+        const n = resposta.ficheiros_processados.length;
+        toast(n === 1 ? "1 ficheiro enviado" : n + " ficheiros enviados");
+        await carregarFicheiros();
+      } catch (erro) {
+        erroUpload.textContent = erro.message;
+        erroUpload.style.display = "block";
+      } finally {
+        barraProgresso.classList.remove("visivel");
+        zonaUpload.style.pointerEvents = "";
+        entradaFicheiros.value = "";
+      }
+    }
+
+    /* ---------- Lista de ficheiros ---------- */
+    async function carregarFicheiros() {
+      try {
+        const dados = await api("/api/ficheiros");
+        const ficheiros = dados.ficheiros;
+        listaFicheiros.innerHTML = "";
+        contadorFicheiros.textContent = ficheiros.length;
+        ficheirosVazio.style.display = ficheiros.length ? "none" : "block";
+        botaoPublicar.disabled = ficheiros.length === 0;
+
+        ficheiros.forEach(f => {
+          const item = document.createElement("div");
+          item.className = "item";
+
+          if (f.thumbnail_url) {
+            const img = document.createElement("img");
+            img.src = f.thumbnail_url;
+            img.alt = f.original_name;
+            img.loading = "lazy";
+            item.appendChild(img);
+          } else {
+            const semImg = document.createElement("div");
+            semImg.className = "sem-img";
+            semImg.textContent = iconePorTipo(f.file_type);
+            item.appendChild(semImg);
+          }
+
+          const info = document.createElement("div");
+          info.className = "item-info";
+
+          const nome = document.createElement("a");
+          nome.className = "item-nome";
+          nome.href = f.r2_url;
+          nome.target = "_blank";
+          nome.rel = "noopener";
+          nome.textContent = f.original_name;
+
+          const meta = document.createElement("span");
+          meta.className = "item-meta";
+          const etiqueta = document.createElement("span");
+          etiqueta.className = "etiqueta " + f.file_type;
+          etiqueta.textContent = nomeTipo(f.file_type);
+          meta.appendChild(etiqueta);
+          meta.appendChild(document.createTextNode("  " + formatoTamanho(f.size_bytes) + " · " + dataCurta(f.uploaded_at)));
+
+          info.appendChild(nome);
+          info.appendChild(meta);
+          item.appendChild(info);
+
+          const apagar = document.createElement("button");
+          apagar.className = "btn btn-pequeno btn-perigo";
+          apagar.type = "button";
+          apagar.textContent = "Apagar";
+          apagar.addEventListener("click", () => apagarFicheiro(f.id, f.original_name));
+          item.appendChild(apagar);
+
+          listaFicheiros.appendChild(item);
+        });
+      } catch (erro) {
+        toast(erro.message, true);
+      }
+    }
+
+    async function apagarFicheiro(id, nome) {
+      if (!confirm("Apagar \"" + nome + "\"?")) return;
+      try {
+        await api("/api/ficheiros/" + id, { method: "DELETE" });
+        toast("Ficheiro apagado");
+        await carregarFicheiros();
+      } catch (erro) {
+        toast(erro.message, true);
+      }
+    }
+
+    /* ---------- Publicação ---------- */
+    botaoPublicar.addEventListener("click", async () => {
+      const nomeSite = document.getElementById("nome-site").value.trim();
+      erroPublicacao.style.display = "none";
+
+      if (!nomeSite) {
+        erroPublicacao.textContent = "Escreve um nome para o site.";
+        erroPublicacao.style.display = "block";
+        return;
+      }
+
+      botaoPublicar.disabled = true;
+      botaoPublicar.textContent = "A publicar...";
+
+      try {
+        const resultado = await api("/api/publicar", {
+          method: "POST",
+          body: JSON.stringify({ site_name: nomeSite })
+        });
+        toast("Site publicado com " + resultado.total_ficheiros + " ficheiros!");
+        document.getElementById("nome-site").value = "";
+        await carregarSites();
+      } catch (erro) {
+        erroPublicacao.textContent = erro.message;
+        erroPublicacao.style.display = "block";
+        await carregarSites();
+      } finally {
+        botaoPublicar.disabled = false;
+        botaoPublicar.textContent = "Publicar site";
+      }
+    });
+
+    /* ---------- Lista de sites ---------- */
+    async function carregarSites() {
+      try {
+        const dados = await api("/api/sites");
+        const sites = dados.sites;
+        listaSites.innerHTML = "";
+        sitesVazio.style.display = sites.length ? "none" : "block";
+
+        sites.forEach(s => {
+          const item = document.createElement("div");
+          item.className = "item";
+
+          const icone = document.createElement("div");
+          icone.className = "sem-img";
+          icone.textContent = "\u{1F310}";
+          item.appendChild(icone);
+
+          const info = document.createElement("div");
+          info.className = "item-info";
+
+          const nome = document.createElement("span");
+          nome.className = "item-nome";
+          nome.textContent = s.site_name;
+
+          const meta = document.createElement("span");
+          meta.className = "item-meta";
+          const selo = document.createElement("span");
+          selo.className = "estado " + s.status;
+          selo.textContent = s.status === "publicado" ? "Publicado"
+            : s.status === "a_processar" ? "A processar" : "Erro";
+          meta.appendChild(selo);
+          meta.appendChild(document.createTextNode(" · " + dataCurta(s.created_at)));
+
+          info.appendChild(nome);
+          info.appendChild(meta);
+
+          if (s.status === "publicado" && s.site_url) {
+            const link = document.createElement("a");
+            link.className = "link-site";
+            link.href = s.site_url;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = s.site_url;
+            info.appendChild(link);
+          } else if (s.status === "erro" && s.error_message) {
+            const erro = document.createElement("span");
+            erro.className = "erro-msg";
+            erro.style.display = "block";
+            erro.textContent = s.error_message;
+            info.appendChild(erro);
+          }
+
+          item.appendChild(info);
+
+          const apagar = document.createElement("button");
+          apagar.className = "btn btn-pequeno btn-perigo";
+          apagar.type = "button";
+          apagar.textContent = "Apagar";
+          apagar.addEventListener("click", () => apagarSite(s.id, s.site_name));
+          item.appendChild(apagar);
+
+          listaSites.appendChild(item);
+        });
+      } catch (erro) {
+        toast(erro.message, true);
+      }
+    }
+
+    async function apagarSite(id, nome) {
+      if (!confirm("Apagar o registo do site \"" + nome + "\"?")) return;
+      try {
+        await api("/api/sites/" + id, { method: "DELETE" });
+        toast("Site apagado");
+        await carregarSites();
+      } catch (erro) {
+        toast(erro.message, true);
+      }
+    }
+
+    /* ---------- Arranque ---------- */
+    carregarEstado();
+    carregarFicheiros();
+    carregarSites();
+  </script>
+</body>
+</html>

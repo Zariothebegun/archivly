@@ -1,0 +1,68 @@
+# ============================================================
+# render.yaml - Blueprint do Render
+# Permite criar o serviço com 1 clique:
+#   render.com -> New + -> Blueprint -> escolhe este repositório
+# O Render deteta este ficheiro e cria tudo (Docker, health check, variáveis).
+# ============================================================
+
+services:
+  - type: web
+    name: archivly
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt          # o mais próximo de Portugal; muda se quiseres
+    healthCheckPath: /healthz
+    autoDeploy: true
+    numInstances: 1
+    envVars:
+      # Gerada automaticamente pelo Render (nunca uses a do exemplo em produção)
+      - key: SECRET_KEY
+        generateValue: true
+
+      # --- Opcionais: deixa vazio e a app funciona em "modo local" ---
+      # Preenche no separador Environment do serviço quando quiseres
+      # publicar os sites no GitHub Pages e guardar ficheiros no Cloudflare R2.
+      - key: GITHUB_TOKEN
+        value: ""
+      - key: GITHUB_USERNAME
+        value: ""
+      - key: R2_ACCOUNT_ID
+        value: ""
+      - key: R2_ACCESS_KEY
+        value: ""
+      - key: R2_SECRET_KEY
+        value: ""
+      - key: R2_BUCKET_NAME
+        value: archivly-files
+      - key: R2_PUBLIC_URL
+        value: ""
+
+      # --- Ajustes ---
+      - key: MAX_UPLOAD_MB
+        value: "100"
+      # O Render define RENDER_EXTERNAL_URL sozinho; só precisas disto
+      # se usares um domínio próprio (ex: https://archivly.com)
+      - key: PUBLIC_BASE_URL
+        value: ""
+
+# ------------------------------------------------------------
+# Alternativa sem Docker (build mais rápido, mas sem Hugo nem
+# ffmpeg -> sem miniaturas de vídeo). Para usar, apaga o bloco
+# acima e descomenta este:
+#
+# services:
+#   - type: web
+#     name: archivly
+#     runtime: python
+#     plan: free
+#     region: frankfurt
+#     buildCommand: pip install -r requirements.txt
+#     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+#     healthCheckPath: /healthz
+#     envVars:
+#       - key: PYTHON_VERSION
+#         value: 3.11.9
+#       - key: SECRET_KEY
+#         generateValue: true
+# ------------------------------------------------------------
