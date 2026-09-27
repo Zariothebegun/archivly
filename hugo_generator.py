@@ -1,111 +1,32 @@
 """
 hugo_generator.py
 ------------------
-Gera um site estático com o Hugo a partir da lista de ficheiros do utilizador.
+Gera o site estático a partir da lista de ficheiros do utilizador.
 O site final tem: grid de miniaturas, pesquisa por nome/data e filtro por tipo.
-Os ficheiros originais continuam alojados no R2 - o Hugo só gera as páginas
-que apontam para lá, o que mantém o repositório do GitHub leve e rápido.
+
+Dois motores, escolhidos automaticamente:
+
+1. **Hugo** (se o binário estiver instalado - é o que o Dockerfile faz).
+2. **Gerador próprio em Python** (fallback) - produz exatamente o mesmo HTML/CSS/JS
+   sem depender de nada instalado. É o que permite correr o Archivly num
+   serviço gratuito sem Docker, ou no telemóvel/PC sem preparar ambiente.
+
+Os ficheiros originais continuam alojados no armazenamento (R2 ou local):
+o site gerado só tem as páginas que apontam para lá, o que mantém o
+repositório do GitHub leve e rápido.
 """
 
-import os
 import json
+import os
 import shutil
 import subprocess
 
 
-TEMPLATE_INDEX_HTML = """<!DOCTYPE html>
-<html lang="pt">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ .Site.Title }}</title>
-<link rel="stylesheet" href="{{ "css/style.css" | relURL }}">
-</head>
-<body>
-  <header class="topo">
-    <h1>{{ .Site.Title }}</h1>
-    <p class="subtitulo">Arquivo digital gerado com Archivly</p>
-  </header>
+# ============================================================
+# Peças partilhadas pelos dois motores (Hugo e Python)
+# ============================================================
 
-  <main>
-    <div class="controlos">
-      <input type="text" id="pesquisa" placeholder="Pesquisar por nome ou data...">
-      <select id="filtro-tipo">
-        <option value="todos">Todos os tipos</option>
-        <option value="imagem">Imagens</option>
-        <option value="video">Vídeos</option>
-        <option value="audio">Áudio</option>
-        <option value="documento">Documentos</option>
-      </select>
-    </div>
-
-    <div id="grid" class="grid"></div>
-    <p id="vazio" class="vazio" style="display:none;">Nenhum ficheiro encontrado.</p>
-  </main>
-
-  <footer>
-    <p>Publicado com <a href="https://github.com" target="_blank">Archivly</a></p>
-  </footer>
-
-<script>
-  const ficheiros = {{ .Site.Data.files | jsonify }};
-
-  const grid = document.getElementById("grid");
-  const inputPesquisa = document.getElementById("pesquisa");
-  const selectTipo = document.getElementById("filtro-tipo");
-  const vazio = document.getElementById("vazio");
-
-  function iconePorTipo(tipo) {
-    if (tipo === "video") return "🎬";
-    if (tipo === "audio") return "🎵";
-    if (tipo === "documento") return "📄";
-    return "🖼️";
-  }
-
-  function renderizar() {
-    const termo = inputPesquisa.value.trim().toLowerCase();
-    const tipo = selectTipo.value;
-
-    const filtrados = ficheiros.filter(f => {
-      const correspondeTermo = f.nome.toLowerCase().includes(termo) || f.data.includes(termo);
-      const correspondeTipo = tipo === "todos" || f.tipo === tipo;
-      return correspondeTermo && correspondeTipo;
-    });
-
-    grid.innerHTML = "";
-    vazio.style.display = filtrados.length === 0 ? "block" : "none";
-
-    filtrados.forEach(f => {
-      const card = document.createElement("a");
-      card.className = "card";
-      card.href = f.url;
-      card.target = "_blank";
-      card.rel = "noopener";
-
-      const miniatura = f.miniatura
-        ? `<img src="${f.miniatura}" alt="${f.nome}" loading="lazy">`
-        : `<div class="sem-miniatura">${iconePorTipo(f.tipo)}</div>`;
-
-      card.innerHTML = `
-        ${miniatura}
-        <div class="card-info">
-          <span class="card-nome">${f.nome}</span>
-          <span class="card-data">${f.data}</span>
-        </div>
-      `;
-      grid.appendChild(card);
-    });
-  }
-
-  inputPesquisa.addEventListener("input", renderizar);
-  selectTipo.addEventListener("change", renderizar);
-  renderizar();
-</script>
-</body>
-</html>
-"""
-
-TEMPLATE_STYLE_CSS = """
+CSS_SITE = """
 :root {
   --preto: #0b0f0c;
   --preto-suave: #141a15;
@@ -137,23 +58,11 @@ body {
   letter-spacing: -0.02em;
 }
 
-.subtitulo {
-  color: var(--texto-suave);
-  margin-top: 8px;
-}
+.subtitulo { color: var(--texto-suave); margin-top: 8px; }
 
-main {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 24px;
-}
+main { max-width: 1100px; margin: 0 auto; padding: 24px; }
 
-.controlos {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
+.controlos { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
 
 #pesquisa {
   flex: 1;
@@ -174,6 +83,8 @@ main {
   color: var(--texto);
 }
 
+.contagem { color: var(--texto-suave); font-size: 0.85rem; margin: 0 0 16px; }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -190,16 +101,9 @@ main {
   transition: border-color 0.15s ease;
 }
 
-.card:hover {
-  border-color: var(--verde);
-}
+.card:hover { border-color: var(--verde); }
 
-.card img {
-  width: 100%;
-  height: 140px;
-  object-fit: cover;
-  display: block;
-}
+.card img { width: 100%; height: 140px; object-fit: cover; display: block; }
 
 .sem-miniatura {
   height: 140px;
@@ -210,12 +114,7 @@ main {
   background: var(--preto);
 }
 
-.card-info {
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+.card-info { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
 
 .card-nome {
   font-size: 0.9rem;
@@ -224,16 +123,9 @@ main {
   text-overflow: ellipsis;
 }
 
-.card-data {
-  font-size: 0.75rem;
-  color: var(--texto-suave);
-}
+.card-data { font-size: 0.75rem; color: var(--texto-suave); }
 
-.vazio {
-  text-align: center;
-  color: var(--texto-suave);
-  padding: 48px 0;
-}
+.vazio { text-align: center; color: var(--texto-suave); padding: 48px 0; }
 
 footer {
   text-align: center;
@@ -246,54 +138,199 @@ footer a { color: var(--verde); }
 """
 
 
-def gerar_site_hugo(pasta_projeto: str, nome_site: str, base_url: str, lista_ficheiros: list) -> str:
+def _script_site(expressao_dados: str) -> str:
     """
-    Cria um projeto Hugo completo numa pasta temporária, com os dados do
-    utilizador, e faz o build. Devolve o caminho da pasta 'public' gerada
-    (pronta a ser publicada no GitHub Pages).
+    JavaScript da página gerada. `expressao_dados` é o JSON dos ficheiros
+    (no Hugo é `{{ .Site.Data.files | jsonify }}`, no fallback é o JSON literal).
+    Usa textContent em vez de innerHTML nos dados do utilizador: um nome de
+    ficheiro com HTML nunca é executado como código.
     """
+    return """
+  const ficheiros = """ + expressao_dados + """;
+
+  const grid = document.getElementById("grid");
+  const inputPesquisa = document.getElementById("pesquisa");
+  const selectTipo = document.getElementById("filtro-tipo");
+  const vazio = document.getElementById("vazio");
+  const contagem = document.getElementById("contagem");
+
+  function iconePorTipo(tipo) {
+    if (tipo === "video") return "\\u{1F3AC}";
+    if (tipo === "audio") return "\\u{1F3B5}";
+    if (tipo === "documento") return "\\u{1F4C4}";
+    return "\\u{1F5BC}\\uFE0F";
+  }
+
+  function renderizar() {
+    const termo = inputPesquisa.value.trim().toLowerCase();
+    const tipo = selectTipo.value;
+
+    const filtrados = ficheiros.filter(f => {
+      const nome = (f.nome || "").toLowerCase();
+      const data = (f.data || "").toLowerCase();
+      const correspondeTermo = !termo || nome.includes(termo) || data.includes(termo);
+      const correspondeTipo = tipo === "todos" || f.tipo === tipo;
+      return correspondeTermo && correspondeTipo;
+    });
+
+    grid.innerHTML = "";
+    vazio.style.display = filtrados.length === 0 ? "block" : "none";
+    contagem.textContent = filtrados.length === 1
+      ? "1 ficheiro"
+      : filtrados.length + " ficheiros";
+
+    filtrados.forEach(f => {
+      const card = document.createElement("a");
+      card.className = "card";
+      card.href = f.url || "#";
+      card.target = "_blank";
+      card.rel = "noopener";
+
+      if (f.miniatura) {
+        const img = document.createElement("img");
+        img.src = f.miniatura;
+        img.alt = f.nome || "";
+        img.loading = "lazy";
+        img.onerror = () => {
+          const fallback = document.createElement("div");
+          fallback.className = "sem-miniatura";
+          fallback.textContent = iconePorTipo(f.tipo);
+          img.replaceWith(fallback);
+        };
+        card.appendChild(img);
+      } else {
+        const semMiniatura = document.createElement("div");
+        semMiniatura.className = "sem-miniatura";
+        semMiniatura.textContent = iconePorTipo(f.tipo);
+        card.appendChild(semMiniatura);
+      }
+
+      const info = document.createElement("div");
+      info.className = "card-info";
+
+      const nome = document.createElement("span");
+      nome.className = "card-nome";
+      nome.textContent = f.nome || "sem nome";
+
+      const data = document.createElement("span");
+      data.className = "card-data";
+      data.textContent = f.data || "";
+
+      info.appendChild(nome);
+      info.appendChild(data);
+      card.appendChild(info);
+      grid.appendChild(card);
+    });
+  }
+
+  inputPesquisa.addEventListener("input", renderizar);
+  selectTipo.addEventListener("change", renderizar);
+  renderizar();
+"""
+
+
+def _pagina(titulo: str, css_href: str, expressao_dados: str) -> str:
+    """HTML da página inicial, partilhado pelos dois motores."""
+    return f"""<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{titulo}</title>
+<link rel="stylesheet" href="{css_href}">
+</head>
+<body>
+  <header class="topo">
+    <h1>{titulo}</h1>
+    <p class="subtitulo">Arquivo digital gerado com Archivly</p>
+  </header>
+
+  <main>
+    <div class="controlos">
+      <input type="text" id="pesquisa" placeholder="Pesquisar por nome ou data...">
+      <select id="filtro-tipo">
+        <option value="todos">Todos os tipos</option>
+        <option value="imagem">Imagens</option>
+        <option value="video">Vídeos</option>
+        <option value="audio">Áudio</option>
+        <option value="documento">Documentos</option>
+      </select>
+    </div>
+
+    <p id="contagem" class="contagem"></p>
+    <div id="grid" class="grid"></div>
+    <p id="vazio" class="vazio" style="display:none;">Nenhum ficheiro encontrado.</p>
+  </main>
+
+  <footer>
+    <p>Publicado com Archivly</p>
+  </footer>
+
+<script>{_script_site(expressao_dados)}</script>
+</body>
+</html>
+"""
+
+
+def hugo_disponivel() -> bool:
+    """True se o binário 'hugo' existir no sistema."""
+    return shutil.which("hugo") is not None
+
+
+def _titulo_seguro(texto: str) -> str:
+    """Escapa o título para não rebentar com o HTML/TOML."""
+    return (
+        texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
+def _json_seguro(lista: list) -> str:
+    """JSON para injetar num <script>, sem permitir fechar a tag."""
+    return json.dumps(lista, ensure_ascii=False).replace("</", "<\\/")
+
+
+# ============================================================
+# Motor 1 - Hugo
+# ============================================================
+
+def _gerar_com_hugo(pasta_projeto: str, nome_site: str, base_url: str, lista_ficheiros: list) -> str:
+    """Cria um projeto Hugo completo e faz o build. Devolve a pasta 'public'."""
     if os.path.exists(pasta_projeto):
         shutil.rmtree(pasta_projeto)
 
-    # 1. Cria o esqueleto do site com o binário do Hugo
     subprocess.run(
         ["hugo", "new", "site", pasta_projeto, "--force"],
         check=True, capture_output=True, text=True,
     )
 
-    # 2. Ficheiro de configuração
-    config_toml = f"""
-baseURL = "{base_url}"
-languageCode = "pt-pt"
-title = "{nome_site}"
-"""
+    titulo_toml = nome_site.replace('"', "'")
     with open(os.path.join(pasta_projeto, "hugo.toml"), "w", encoding="utf-8") as f:
-        f.write(config_toml.strip() + "\n")
+        f.write(
+            f'baseURL = "{base_url}"\n'
+            f'languageCode = "pt-pt"\n'
+            f'title = "{titulo_toml}"\n'
+        )
 
-    # 3. Conteúdo da página inicial (obrigatório para o Hugo gerar a home)
     os.makedirs(os.path.join(pasta_projeto, "content"), exist_ok=True)
     with open(os.path.join(pasta_projeto, "content", "_index.md"), "w", encoding="utf-8") as f:
-        f.write(f"---\ntitle: \"{nome_site}\"\n---\n")
+        f.write(f'---\ntitle: "{titulo_toml}"\n---\n')
 
-    # 4. Layout personalizado (verde/preto, grid, pesquisa e filtro)
     pasta_layouts = os.path.join(pasta_projeto, "layouts")
     os.makedirs(pasta_layouts, exist_ok=True)
     with open(os.path.join(pasta_layouts, "index.html"), "w", encoding="utf-8") as f:
-        f.write(TEMPLATE_INDEX_HTML)
+        f.write(_pagina("{{ .Site.Title }}", '{{ "css/style.css" | relURL }}',
+                        "{{ .Site.Data.files | jsonify }}"))
 
-    # 5. CSS estático
     pasta_css = os.path.join(pasta_projeto, "static", "css")
     os.makedirs(pasta_css, exist_ok=True)
     with open(os.path.join(pasta_css, "style.css"), "w", encoding="utf-8") as f:
-        f.write(TEMPLATE_STYLE_CSS)
+        f.write(CSS_SITE)
 
-    # 6. Dados dos ficheiros (o Hugo lê isto e injeta no HTML como JSON)
     pasta_data = os.path.join(pasta_projeto, "data")
     os.makedirs(pasta_data, exist_ok=True)
     with open(os.path.join(pasta_data, "files.json"), "w", encoding="utf-8") as f:
         json.dump(lista_ficheiros, f, ensure_ascii=False)
 
-    # 7. Build do site estático
     resultado = subprocess.run(
         ["hugo", "--minify", "-d", "public"],
         cwd=pasta_projeto, capture_output=True, text=True,
@@ -302,3 +339,48 @@ title = "{nome_site}"
         raise RuntimeError(f"Erro ao gerar o site com Hugo: {resultado.stderr}")
 
     return os.path.join(pasta_projeto, "public")
+
+
+# ============================================================
+# Motor 2 - Gerador em Python puro (sem dependências externas)
+# ============================================================
+
+def _gerar_com_python(pasta_public: str, nome_site: str, lista_ficheiros: list) -> str:
+    """Escreve diretamente o site estático. Devolve a pasta com o conteúdo final."""
+    if os.path.exists(pasta_public):
+        shutil.rmtree(pasta_public)
+    os.makedirs(os.path.join(pasta_public, "css"), exist_ok=True)
+
+    with open(os.path.join(pasta_public, "index.html"), "w", encoding="utf-8") as f:
+        f.write(_pagina(_titulo_seguro(nome_site), "css/style.css", _json_seguro(lista_ficheiros)))
+
+    with open(os.path.join(pasta_public, "css", "style.css"), "w", encoding="utf-8") as f:
+        f.write(CSS_SITE)
+
+    return pasta_public
+
+
+# ============================================================
+# Função principal
+# ============================================================
+
+def gerar_site_hugo(pasta_projeto: str, nome_site: str, base_url: str, lista_ficheiros: list) -> str:
+    """
+    Gera o site estático e devolve o caminho da pasta pronta a publicar.
+    Usa Hugo quando existe; caso contrário usa o gerador em Python.
+    """
+    if hugo_disponivel():
+        try:
+            pasta_public = _gerar_com_hugo(pasta_projeto, nome_site, base_url, lista_ficheiros)
+            # Rede de segurança: confirma que o Hugo produziu mesmo a página inicial
+            if os.path.isfile(os.path.join(pasta_public, "index.html")):
+                return pasta_public
+            print("[hugo_generator] O Hugo não gerou index.html; a usar o gerador Python.")
+        except Exception as erro:
+            print(f"[hugo_generator] Hugo falhou ({erro}); a usar o gerador Python.")
+
+    return _gerar_com_python(os.path.join(pasta_projeto, "public"), nome_site, lista_ficheiros)
+
+
+# Nome mais honesto para quem não quer saber do motor usado
+gerar_site = gerar_site_hugo

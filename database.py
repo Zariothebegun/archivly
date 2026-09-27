@@ -11,7 +11,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", "archivly.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH", os.path.join("data", "archivly.db"))
+
+# Garante que a pasta existe antes de o SQLite tentar lá escrever
+os.makedirs(os.path.dirname(os.path.abspath(DATABASE_PATH)), exist_ok=True)
 
 
 def get_db():
@@ -38,6 +41,21 @@ def init_db():
         )
     """)
 
+    # Tabela de sites publicados (criada antes de 'files' porque 'files' a referencia)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            site_name TEXT NOT NULL,       -- nome escolhido pelo utilizador
+            repo_name TEXT NOT NULL,       -- nome do repositório no GitHub (ou slug local)
+            site_url TEXT,                 -- URL final do site
+            status TEXT DEFAULT 'a_processar', -- a_processar, publicado, erro
+            error_message TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+
     # Tabela de ficheiros enviados pelo utilizador
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS files (
@@ -47,29 +65,14 @@ def init_db():
             file_type TEXT NOT NULL,       -- imagem, video, audio, documento
             mime_type TEXT,
             size_bytes INTEGER,
-            r2_key TEXT NOT NULL,          -- caminho do ficheiro original no R2
-            r2_url TEXT NOT NULL,          -- URL público do ficheiro original
-            thumbnail_r2_key TEXT,         -- caminho da miniatura no R2 (se existir)
-            thumbnail_url TEXT,            -- URL público da miniatura
+            r2_key TEXT NOT NULL,          -- caminho do ficheiro original (R2 ou disco local)
+            r2_url TEXT NOT NULL,          -- URL do ficheiro original
+            thumbnail_r2_key TEXT,         -- caminho da miniatura (se existir)
+            thumbnail_url TEXT,            -- URL da miniatura
             site_id INTEGER,               -- a que site pertence (pode ser NULL até publicar)
             uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id),
             FOREIGN KEY (site_id) REFERENCES sites (id)
-        )
-    """)
-
-    # Tabela de sites publicados
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            site_name TEXT NOT NULL,       -- nome escolhido pelo utilizador
-            repo_name TEXT NOT NULL,       -- nome do repositório no GitHub
-            site_url TEXT,                 -- URL final do GitHub Pages
-            status TEXT DEFAULT 'a_processar', -- a_processar, publicado, erro
-            error_message TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
         )
     """)
 
