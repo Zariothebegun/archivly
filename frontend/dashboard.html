@@ -20,8 +20,6 @@
   </header>
 
   <main>
-    <div class="avisos" id="avisos"></div>
-
     <!-- 1. Enviar ficheiros -->
     <section class="seccao">
       <h2>1. Enviar ficheiros</h2>
@@ -91,52 +89,6 @@
 
     document.getElementById("email-utilizador").textContent = localStorage.getItem("archivly_email") || "";
     document.getElementById("botao-sair").addEventListener("click", terminarSessao);
-
-    let estado = { armazenamento: "local", github_pages: false };
-
-    /* ---------- Avisos de configuração ---------- */
-    async function carregarEstado() {
-      try {
-        estado = await api("/api/estado");
-        caixaAvisos.innerHTML = "";
-
-        if (!estado.github_pages) {
-          caixaAvisos.appendChild(aviso(
-            "informacao",
-            "Publicação local ativa",
-            "Os sites são publicados neste servidor em /sites/<nome>/ e o link aparece abaixo. " +
-            "Para publicar no GitHub Pages, define GITHUB_TOKEN e GITHUB_USERNAME nas variáveis de ambiente."
-          ));
-        } else {
-          caixaAvisos.appendChild(aviso(
-            "ok",
-            "GitHub Pages ligado",
-            "Os sites são publicados em " + estado.github_username + ".github.io."
-          ));
-        }
-
-        if (estado.armazenamento === "local") {
-          caixaAvisos.appendChild(aviso(
-            "informacao",
-            "Armazenamento local",
-            "Os ficheiros ficam guardados no servidor (pasta data/). Para produção com CDN, " +
-            "configura as variáveis R2_* (Cloudflare R2, grátis até 10 GB)."
-          ));
-        }
-      } catch (erro) {
-        console.error(erro);
-      }
-    }
-
-    function aviso(tipo, titulo, texto) {
-      const caixa = document.createElement("div");
-      caixa.className = "aviso" + (tipo === "informacao" ? " informacao" : "");
-      const forte = document.createElement("strong");
-      forte.textContent = titulo + ". ";
-      caixa.appendChild(forte);
-      caixa.appendChild(document.createTextNode(texto));
-      return caixa;
-    }
 
     /* ---------- Upload ---------- */
     zonaUpload.addEventListener("click", () => entradaFicheiros.click());
@@ -361,7 +313,6 @@
     }
 
     /* ---------- Arranque ---------- */
-    carregarEstado();
     carregarFicheiros();
     carregarSites();
   </script>
