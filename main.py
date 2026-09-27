@@ -321,8 +321,8 @@ def publicar_site(pedido: PedidoPublicacao, utilizador: dict = Depends(obter_uti
         {
             "nome": f["original_name"],
             "tipo": f["file_type"],
-            "url": f["r2_url"],
-            "miniatura": f["thumbnail_url"],
+            "url": url_absoluto(f["r2_url"]),
+            "miniatura": url_absoluto(f["thumbnail_url"]) if f["thumbnail_url"] else None,
             "data": (f["uploaded_at"] or "")[:10],
         }
         for f in ficheiros_db
